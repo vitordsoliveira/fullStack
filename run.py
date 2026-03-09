@@ -1,5 +1,5 @@
 from flask import Flask
-from src.config.data_base import init_db
+from data_base import init_db
 from src.routes import init_routes
 
 def create_app():

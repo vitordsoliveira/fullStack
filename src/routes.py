@@ -11,6 +11,3 @@ def init_routes(app):
     @app.route('/user', methods=['POST'])
     def register_user():
         return UserController.register_user()
-    
-    
-
