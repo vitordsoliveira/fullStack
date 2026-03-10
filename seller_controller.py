@@ -3,6 +3,8 @@ from seller_model import Seller
 from data_base import db
 from twilio_service import send_activation_code
 import random
+from twilio.base.exceptions import TwilioRestException
+from sqlalchemy.exc import SQLAlchemyError
 
 seller_bp = Blueprint('seller_bp', __name__)
 
@@ -13,8 +15,12 @@ def create_seller():
     if not all(k in data for k in ['nome', 'cnpj', 'email', 'celular', 'senha']):
         return jsonify({'error': 'Dados incompletos'}), 400
 
-    if Seller.query.filter((Seller.email == data['email']) | (Seller.cnpj == data['cnpj'])).first():
-        return jsonify({'error': 'E-mail ou CNPJ já cadastrado'}), 409
+    celular = data['celular']
+    if not celular.startswith('+'):
+        celular = f"+55{celular}"
+
+    if Seller.query.filter((Seller.email == data['email']) | (Seller.cnpj == data['cnpj']) | (Seller.celular == celular)).first():
+        return jsonify({'error': 'E-mail, CNPJ ou Celular já cadastrado'}), 409
 
     activation_code = str(random.randint(1000, 9999))
 
@@ -22,23 +28,28 @@ def create_seller():
         nome=data['nome'],
         cnpj=data['cnpj'],
         email=data['email'],
-        celular=data['celular'],
+        celular=celular,
         status='Inativo',
         activation_code=activation_code
     )
     new_seller.set_password(data['senha'])
 
     try:
-        send_activation_code(new_seller.celular, activation_code)
-        
         db.session.add(new_seller)
         db.session.commit()
 
-        return jsonify({'message': 'Cadastro realizado com sucesso! Verifique seu WhatsApp para o código de ativação.'}), 201
+        send_activation_code(new_seller.celular, activation_code)
 
-    except Exception as e:
+        return jsonify({'message': 'Cadastro realizado! Verifique seu WhatsApp para o código de ativação.'}), 201
+
+    except TwilioRestException as e:
         db.session.rollback()
-        return jsonify({'error': f'Falha ao cadastrar ou enviar código: {str(e)}'}), 500
+        print(f"DEBUG: Twilio API Error - {e}")
+        return jsonify({'error': 'Falha ao enviar o código de ativação. Verifique se o número de celular está correto e em formato internacional (+55119...).'}), 500
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        print(f"DEBUG: Database Error - {e}")
+        return jsonify({'error': 'Ocorreu um erro interno ao salvar os dados.'}), 500
 
 @seller_bp.route('/api/sellers/activate', methods=['POST'])
 def activate_seller():
@@ -47,7 +58,11 @@ def activate_seller():
     if not all(k in data for k in ['celular', 'codigo']):
         return jsonify({'error': 'Celular e código são obrigatórios'}), 400
 
-    seller = Seller.query.filter_by(celular=data['celular']).first()
+    celular = data['celular']
+    if not celular.startswith('+'):
+        celular = f"+55{celular}"
+
+    seller = Seller.query.filter_by(celular=celular).first()
 
     if not seller:
         return jsonify({'error': 'Seller não encontrado'}), 404
